@@ -1,0 +1,1 @@
+{"acquisition": [{"acquisition/f1": 0.9419657832941967, "acquisition/hp/learning_rate": 6.4268107366912e-05, "acquisition/hp/num_train_epochs": 4, "acquisition/hp/warmup_ratio": 0.06, "acquisition/hp/weight_decay": 0.07, "acquisition/hp/lr_scheduler_type": "linear", "acquisition/hp/per_device_train_batch_size": 4, "_timestamp": 1652707015, "_runtime": 1272}], "successor": []}

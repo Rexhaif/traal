@@ -2,10 +2,19 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+*wandb*
+*/models/*
 # C extensions
 *.so
-
+*.bin
+*.pt
+*.pth
+config.json
+special_tokens_map.json
+tokenizer_config.json
+tokenizer.json
+trainer_state.json
+vocab.txt
 # Distribution / packaging
 .Python
 build/
