@@ -1,3 +1,10 @@
 {
-    "jupyter.jupyterServerType": "remote"
+    "security.workspace.trust.untrustedFiles": "open",
+    "jupyter.allowUnauthorizedRemoteConnection": true,
+    "jupyter.askForKernelRestart": false,
+    "jupyter.widgetScriptSources": [
+        "jsdelivr.com",
+        "unpkg.com"
+    ],
+    "notebook.output.textLineLimit": 5000
 }

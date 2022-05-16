@@ -1,0 +1,7 @@
+cuda_devices: [0, 1]
+tasks:
+  - name: "conll2003_full"
+    script: "run_al_ner.py"
+    base_conf: "../config/conll2003_full.yaml"
+    kind: "full"
+    seeds: [73, 81, 999]
