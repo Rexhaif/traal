@@ -11,7 +11,7 @@ wandb:
   project: traal
 
 experiment:
-  kind: "al"
+  kind: "al-random"
 
 model:
   name: distilbert-base-cased

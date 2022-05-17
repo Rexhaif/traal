@@ -16,6 +16,10 @@ NER_TAG_MAPPING = {
     'conll2003': ['O', 'B-LOC', 'B-MISC', 'B-ORG', 'B-PER', 'I-LOC', 'I-MISC', 'I-ORG', 'I-PER']
 }
 
+DATASET_TO_TASK = {
+    'conll2003': 'ner'
+}
+
 
 def add_to_json_log(log_dict: Dict[str, Any], json_file: Path, key: str = 'acquisition'):
     if not json_file.exists():
@@ -60,25 +64,6 @@ def copy_dataset(source_uri: str, destination_uri: str):
         shutil.copytree(source_uri, destination_uri, dirs_exist_ok=True)
 
 
-def add_random_selection(dataset: Dataset, n_select: int = 50):
-
-    if "selected" not in dataset.features:
-        selection_mark = np.zeros(len(dataset)).astype(bool)
-
-        indices = np.array(range(len(dataset)), dtype=int)
-    else:
-        selection_mark = np.array(dataset['selected']).astype(bool)
-        dataset = dataset.remove_columns(['selected'])
-        indices = np.array(range(len(dataset)), dtype=int)
-        indices = indices[~selection_mark]
-        
-    indices = np.random.choice(indices, size=n_select)
-    selection_mark[indices] = 1
-
-    dataset = dataset.add_column('selected', selection_mark)
-    return dataset
-
-
 def select_examples(dataset):
     selected = dataset.filter(lambda x: x['selected'] == 1, batched=False)
     return selected
@@ -105,3 +90,28 @@ def get_time_for_saving():
 def create_experiment_id() -> str:
     base_uuid = str(uuid4()).split("-")[-1]
     return base_uuid
+
+
+def make_paths(
+    dataset_kind: str, 
+    experiment_name: str, 
+    experiment_seed: int, 
+    experiment_time: str, 
+    experiment_id: str
+):
+
+    base_path = Path(
+        f"../experiments/{dataset_kind}/{experiment_name}/{experiment_seed}/{experiment_time}-{experiment_id}"
+    )
+    base_path.mkdir(parents=True, exist_ok=True)
+    model_dir = base_path / "models" / "latest-model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    hp_search_dir = base_path / "hp_search"
+    log_path = base_path / "logs.json"
+
+    return {
+        "base": base_path,
+        "hp_search": hp_search_dir,
+        "model": model_dir,
+        "logs": log_path
+    }

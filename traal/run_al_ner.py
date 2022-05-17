@@ -13,6 +13,7 @@ import optuna
 import os
 import time
 import logging
+import score_and_select
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,34 +24,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def prepare_dataset(
-    dataset_uri: str,
+    config: omg.DictConfig,
     tokenizer: tr.PreTrainedTokenizer, 
-    dataset_kind: str = "conll2003",
-    sample_al: bool = False,
-    sample_column: str = None,
-    sample_size: int = 50,
-    n_jobs: int = 2
-) -> Tuple[DatasetDict, Dataset, List[int]]:
+) -> Tuple[DatasetDict, List[int]]:
 
-    dataset = utils.load_dataset(dataset_uri)
+    logger.info("==> Running scoring and seletion")
+    score_and_select.run_score_and_select(config)
 
-    id2label = utils.NER_TAG_MAPPING[dataset_kind]
+    dataset = utils.load_dataset(config.dataset.uri)
+
+    id2label = utils.NER_TAG_MAPPING[config.dataset.kind]
     label2id = {k:i for i, k in enumerate(id2label)}
 
-    # add selection before preprocessing, then save dataset, then run preprocessing
-    # dataset after preprocessing is not saved
-    if sample_al:
-        logger.info(f"Randomly sampling additional {sample_size} examples")
-        dataset['train'] = utils.add_random_selection(dataset['train'], n_select=sample_size)
-        logger.info("Saving dataset with updated selection marks")
-        utils.save_dataset(config.dataset.uri, dataset)
-        logger.info("Cleaning unselected examples")
-        dataset['train'] = utils.select_examples(dataset['train'])
-    else:
-        logger.info("No sampling, using full dataset")
+    # filtering out unselected examples
+    dataset['train'] = utils.select_examples(dataset['train'])
 
     logger.info(f"===> Labeled Dataset size: {len(dataset['train'])}")
-    logger.info(f"Full dataset has following structure: {dataset}")
+    logger.info(f"===> Full dataset has following structure: {dataset}")
 
     def convert_label_to_ids(item):
         """
@@ -62,7 +52,7 @@ def prepare_dataset(
         }
 
     logger.info("Remapping ner tags str -> idx")
-    dataset = dataset.map(convert_label_to_ids, batched=False, num_proc=n_jobs)
+    dataset = dataset.map(convert_label_to_ids, batched=False, num_proc=config.dataset.n_jobs)
 
     def tokenize_and_align_labels(examples):
         """
@@ -89,7 +79,7 @@ def prepare_dataset(
         return tokenized_inputs
 
     logger.info("Tokenization and tag alignment")
-    dataset = dataset.map(tokenize_and_align_labels, batched=True, batch_size=128, num_proc=n_jobs)
+    dataset = dataset.map(tokenize_and_align_labels, batched=True, batch_size=128, num_proc=config.dataset.n_jobs)
 
     return dataset, id2label
 
@@ -100,13 +90,17 @@ def run_al_training(config: omg.DictConfig):
 
     tr.trainer_utils.set_seed(config.experiment.seed)
     logger.info("===> Initializing WandB")
-    output_dir = Path(
-        f"../experiments/{config.dataset.kind}/{config.experiment.name}/{config.experiment.seed}/{config.experiment.time}-{config.experiment.id}"
+    paths = utils.make_paths(
+        config.dataset.kind,
+        config.experiment.name,
+        config.experiment.seed,
+        config.experiment.time,
+        config.experiment.id
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
+    
     wandb_client = wandb.init(
         project=config.wandb.project,
-        dir=str(output_dir),
+        dir=str(paths['base']),
         group=config.experiment.group,
         name=config.experiment.name,
         entity=config.wandb.entity,
@@ -117,22 +111,10 @@ def run_al_training(config: omg.DictConfig):
 
     tokenizer = tr.AutoTokenizer.from_pretrained(config.model.name)
 
-    if not config.dataset.sample_al:
-        full_dataset, id2label = prepare_dataset(
-            dataset_uri=config.dataset.uri,
-            tokenizer=tokenizer,
-            n_jobs=config.dataset.n_jobs,
-            sample_al=config.dataset.sample_al
-        )
-    else:
-        full_dataset, id2label = prepare_dataset(
-            dataset_uri=config.dataset.uri,
-            tokenizer=tokenizer,
-            n_jobs=config.dataset.n_jobs,
-            sample_al=config.dataset.sample_al,
-            sample_size=config.dataset.sample_size,
-            sample_column=config.dataset.sample_column
-        )
+    full_dataset, id2label = prepare_dataset(
+        config,
+        tokenizer=tokenizer
+    )
 
     metrics = SeqEvalMetrics(id2label=id2label)
 
@@ -143,10 +125,8 @@ def run_al_training(config: omg.DictConfig):
 
     data_collator = tr.DataCollatorForTokenClassification(tokenizer=tokenizer, pad_to_multiple_of=8)
 
-    hp_search_path = output_dir / "hp_search"
-
     training_args = tr.TrainingArguments(
-        output_dir=hp_search_path,
+        output_dir=paths['hp_search'],
         evaluation_strategy="epoch",
         save_strategy='epoch',
         disable_tqdm=True,
@@ -198,8 +178,8 @@ def run_al_training(config: omg.DictConfig):
     t_end = time.time()
     logger.info(f"===> HP Search done. Best Trial: {best_trial}")
         
-    model_dir = utils.get_checkpoint_dir(hp_search_path, best_trial)
-    save_dir = Path(output_dir) / "models" / "latest-model"
+    model_dir = utils.get_checkpoint_dir(paths['hp_search'], best_trial)
+    save_dir = paths['model']
     if save_dir.exists():
         shutil.rmtree(save_dir)
 
@@ -208,7 +188,7 @@ def run_al_training(config: omg.DictConfig):
     model_dir.replace(save_dir)
 
     logger.info("Cleaning up hp search checkpoints")
-    shutil.rmtree(hp_search_path)
+    shutil.rmtree(paths['hp_search'])
 
     log_dict = {
         'acquisition/f1': best_trial.objective,
@@ -223,7 +203,7 @@ def run_al_training(config: omg.DictConfig):
     wandb_client.log(log_dict)
 
     logger.info("Saving dict to json log")
-    utils.add_to_json_log(log_dict=log_dict, json_file=output_dir / "logs.json", key="acquisition")
+    utils.add_to_json_log(log_dict=log_dict, json_file=paths['logs'], key="acquisition")
 
     wandb_client.finish()
     logger.info("===> WandB finished")
@@ -237,10 +217,3 @@ if __name__ == "__main__":
 
     logger.info(f"===> Common loaded config:\n{omg.OmegaConf.to_yaml(config)}")
     run_al_training(config)
-
-    
-
-
-    
-
-
