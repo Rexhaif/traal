@@ -1,4 +1,4 @@
-from lib2to3.pytree import Base
+from asyncio.log import logger
 from datasets import DatasetDict, Dataset
 from datasets.filesystems import S3FileSystem
 from uuid import uuid4
@@ -6,8 +6,10 @@ import json
 from datetime import datetime
 import transformers as tr
 import numpy as np
+import os
 from typing import Dict, Any
 from pathlib import Path
+import shutil
 
 
 NER_TAG_MAPPING = {
@@ -43,6 +45,19 @@ def save_dataset(dataset_uri: str, dataset: DatasetDict):
         dataset.save_to_disk(dataset_uri, fs=s3fs)
     else:
         dataset.save_to_disk(dataset_uri)
+
+def count_n_tokens(dataset: Dataset) -> int:
+    counter = 0
+    for row in dataset:
+        counter += len(row['tokens'])
+
+    return counter
+
+def copy_dataset(source_uri: str, destination_uri: str):
+    if 's3://' in source_uri or "s3://" in destination_uri:
+        ret = os.system(f"aws s3 cp --recursive {source_uri} {destination_uri}")
+    else:
+        shutil.copytree(source_uri, destination_uri, dirs_exist_ok=True)
 
 
 def add_random_selection(dataset: Dataset, n_select: int = 50):

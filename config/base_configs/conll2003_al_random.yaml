@@ -1,0 +1,19 @@
+dataset:
+  kind: conll2003
+  uri: s3://traal-storage/experiments/conll2003-full
+  n_jobs: 10
+  sample_al: true
+  sample_size: 128
+  sample_column: score_0
+
+wandb:
+  entity: dslarionov
+  project: traal
+
+experiment:
+  kind: "al"
+
+model:
+  name: distilbert-base-cased
+  min_updates_per_epoch: 20
+  n_trials: 10

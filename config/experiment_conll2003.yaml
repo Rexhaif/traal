@@ -1,0 +1,19 @@
+cuda_devices: [0, 1]
+tasks:
+  - name: "conll2003-distilbert-al-random"
+    script: "run_al_ner.py"
+    n_iterations: 20
+    dataset: "s3://traal-storage/datasets/conll2003"
+    base_conf: "../config/base_configs/conll2003_al_random.yaml"
+    additional_args: ""
+    kind: "al"
+    seeds: [73, 81, 999]
+    
+  - name: "conll2003-distilbert-full"
+    script: "run_al_ner.py"
+    base_conf: "../config/base_configs/conll2003_full.yaml"
+    kind: "full"
+    additional_args: ""
+    seeds: [73, 81, 999]
+
+  

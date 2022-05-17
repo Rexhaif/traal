@@ -1,0 +1,9 @@
+cuda_devices: [0]
+tasks:
+  - name: "conll2003_al_random"
+    script: "run_al_ner.py"
+    n_iterations: 20
+    dataset: "s3://traal-storage/datasets/conll2003"
+    base_conf: "../config/base_configs/conll2003_al_random.yaml"
+    kind: "al"
+    seeds: [73]

@@ -30,8 +30,15 @@ def initialize_worker(num_cuda_devices=1):
     logger.info(f"Worker cuda devices: {','.join(WORKER_CUDA_DEVICES)}")
 
 
+def common_task_fn(args):
+    kind = args['kind']
+    if kind == "full":
+        one_run_task_fn(args['args'])
+    elif kind == "al":
+        al_iterations_task_fn(args['args'])
+
 def one_run_task_fn(task):
-    script, name, base_conf, seed, id_ = task
+    script, name, base_conf, seed, id_, additional_args = task
     time_str = utils.get_time_for_saving()
     if WORKER_CUDA_DEVICES is None or len(WORKER_CUDA_DEVICES) == 0:
         cuda_str = 'CUDA_VISIBLE_DEVICES=""'
@@ -40,13 +47,37 @@ def one_run_task_fn(task):
         cuda_str = f'CUDA_VISIBLE_DEVICES={",".join(WORKER_CUDA_DEVICES)}'
 
     task_str = f"{cuda_str} python {script} base_conf={base_conf} " \
-        f"experiment.seed={seed} experiment.id={id_} experiment.time={time_str} experiment.name={name}+{seed}"
+        f"experiment.seed={seed} experiment.id={id_} experiment.time={time_str} " \
+        f"experiment.name={name}+{seed} experiment.group={name} {additional_args}"
 
     time.sleep(np.random.randint(1_000) / 1_000)
     logger.info(f"Running command: {task_str}")
     ret = os.system(task_str)
     ret = str(ret)
     logger.info(f'Task "{name}+{seed}" finished with return code: {ret}.')
+
+def al_iterations_task_fn(task):
+    script, name, base_conf, seed, id_, additional_args, n_iterations, dataset_path = task
+    time_str = utils.get_time_for_saving()
+    if WORKER_CUDA_DEVICES is None or len(WORKER_CUDA_DEVICES) == 0:
+        cuda_str = 'CUDA_VISIBLE_DEVICES=""'
+        logger.warn(f"Running without cuda devices, worker cuda devices empty or not set {WORKER_CUDA_DEVICES}")
+    else:
+        cuda_str = f'CUDA_VISIBLE_DEVICES={",".join(WORKER_CUDA_DEVICES)}'
+
+    
+
+    for i in range(n_iterations):
+        logger.info(f"===> AL Iteration {i+1}")
+        task_str = f"{cuda_str} python {script} base_conf={base_conf} " \
+            f"experiment.seed={seed} experiment.id={id_} experiment.time={time_str} " \
+            f"experiment.name={name}+{seed} experiment.group={name} dataset.uri={dataset_path} " \
+            f"experiment.iteration={i+1} {additional_args}"
+        ret = os.system(task_str)
+        ret = str(ret)
+        logger.info(f'Task "{name}+{seed}" iteration {i+1} finished with return code: {ret}.')
+        assert ret == "0", "Task failed, stopping experiment"
+
 
 def run_tasks(config: omg.DictConfig):
     for idx in config.cuda_devices:
@@ -59,9 +90,20 @@ def run_tasks(config: omg.DictConfig):
         if task.kind == "full":
             for seed in task.seeds:
                 id_ = utils.create_experiment_id()
-                tasks.append(
-                    (task.script, task.name, task.base_conf, seed, id_)
-                )
+                tasks.append({
+                    "kind": "full",
+                    "args": (task.script, task.name, task.base_conf, seed, id_, task.additional_args)
+                })
+        if task.kind == "al":
+            for seed in task.seeds:
+                id_ = utils.create_experiment_id()
+                new_dataset_path = f"s3://traal-storage/experiments/{task.name}-{seed}"
+                logger.info(f"Copying dataset from {task.dataset} to {new_dataset_path}")
+                utils.copy_dataset(task.dataset, new_dataset_path)
+                tasks.append({
+                    "kind": "al",
+                    "args": (task.script, task.name, task.base_conf, seed, id_, task.additional_args, task.n_iterations, new_dataset_path)
+                })
 
     logger.info(f"Running {len(config.tasks)} experiments, {len(tasks)} run total(with seeds)")
 
@@ -70,7 +112,7 @@ def run_tasks(config: omg.DictConfig):
         initializer=partial(initialize_worker, num_cuda_devices=1),
     )
     try:
-        pool.map(one_run_task_fn, tasks)
+        pool.map(common_task_fn, tasks)
 
         pool.close()
         pool.join()

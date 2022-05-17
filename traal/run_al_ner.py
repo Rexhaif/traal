@@ -11,6 +11,7 @@ import argparse as ap
 from pathlib import Path
 import optuna
 import os
+import time
 import logging
 
 logging.basicConfig(
@@ -31,7 +32,7 @@ def prepare_dataset(
     n_jobs: int = 2
 ) -> Tuple[DatasetDict, Dataset, List[int]]:
 
-    dataset = utils.load_dataset(config.dataset.uri)
+    dataset = utils.load_dataset(dataset_uri)
 
     id2label = utils.NER_TAG_MAPPING[dataset_kind]
     label2id = {k:i for i, k in enumerate(id2label)}
@@ -40,13 +41,16 @@ def prepare_dataset(
     # dataset after preprocessing is not saved
     if sample_al:
         logger.info(f"Randomly sampling additional {sample_size} examples")
-        train = utils.add_random_selection(train, n_select=sample_size)
-        dataset['train'] = train
+        dataset['train'] = utils.add_random_selection(dataset['train'], n_select=sample_size)
         logger.info("Saving dataset with updated selection marks")
         utils.save_dataset(config.dataset.uri, dataset)
-        dataset['train'] = utils.select_examples(train)
+        logger.info("Cleaning unselected examples")
+        dataset['train'] = utils.select_examples(dataset['train'])
     else:
         logger.info("No sampling, using full dataset")
+
+    logger.info(f"===> Labeled Dataset size: {len(dataset['train'])}")
+    logger.info(f"Full dataset has following structure: {dataset}")
 
     def convert_label_to_ids(item):
         """
@@ -87,17 +91,17 @@ def prepare_dataset(
     logger.info("Tokenization and tag alignment")
     dataset = dataset.map(tokenize_and_align_labels, batched=True, batch_size=128, num_proc=n_jobs)
 
-    logger.info(f"===> Labeled Dataset size: {len(dataset['train'])}")
-    logger.info(f"Full dataset has following structure: {dataset}")
-
     return dataset, id2label
 
 
 def run_al_training(config: omg.DictConfig):
+
+    t_start = time.time()
+
     tr.trainer_utils.set_seed(config.experiment.seed)
     logger.info("===> Initializing WandB")
     output_dir = Path(
-        f"../experiments/{config.dataset.kind}/{config.experiment.seed}/{config.experiment.time}-{config.experiment.id}"
+        f"../experiments/{config.dataset.kind}/{config.experiment.name}/{config.experiment.seed}/{config.experiment.time}-{config.experiment.id}"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     wandb_client = wandb.init(
@@ -119,6 +123,15 @@ def run_al_training(config: omg.DictConfig):
             tokenizer=tokenizer,
             n_jobs=config.dataset.n_jobs,
             sample_al=config.dataset.sample_al
+        )
+    else:
+        full_dataset, id2label = prepare_dataset(
+            dataset_uri=config.dataset.uri,
+            tokenizer=tokenizer,
+            n_jobs=config.dataset.n_jobs,
+            sample_al=config.dataset.sample_al,
+            sample_size=config.dataset.sample_size,
+            sample_column=config.dataset.sample_column
         )
 
     metrics = SeqEvalMetrics(id2label=id2label)
@@ -182,11 +195,14 @@ def run_al_training(config: omg.DictConfig):
         backend="optuna",
         n_trials=config.model.n_trials # number of trials
     )
-
+    t_end = time.time()
     logger.info(f"===> HP Search done. Best Trial: {best_trial}")
-
+        
     model_dir = utils.get_checkpoint_dir(hp_search_path, best_trial)
-    save_dir = Path(output_dir) / "models" / "full"
+    if config.experiment.kind == "al":
+        save_dir = Path(output_dir) / "models" / f"al-{config.experiment.iteration}"
+    elif config.experiment.kind == "full":
+        save_dir = Path(output_dir) / "models" / "full"
 
     logger.info(f"Movig best checkpoint to experiment folder")
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -196,7 +212,9 @@ def run_al_training(config: omg.DictConfig):
     shutil.rmtree(hp_search_path)
 
     log_dict = {
-        'acquisition/f1': best_trial.objective
+        'acquisition/f1': best_trial.objective,
+        'acquisition/iteration_time': t_end - t_start,
+        'acquisition/total_tokens_labeled': utils.count_n_tokens(full_dataset['train'])
     }
 
     for key, val in best_trial.hyperparameters.items():

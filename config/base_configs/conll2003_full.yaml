@@ -9,7 +9,7 @@ wandb:
   project: traal
 
 experiment:
-  group: conll2003-full
+  kind: "full"
 
 model:
   name: distilbert-base-cased
