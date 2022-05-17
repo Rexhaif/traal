@@ -199,10 +199,9 @@ def run_al_training(config: omg.DictConfig):
     logger.info(f"===> HP Search done. Best Trial: {best_trial}")
         
     model_dir = utils.get_checkpoint_dir(hp_search_path, best_trial)
-    if config.experiment.kind == "al":
-        save_dir = Path(output_dir) / "models" / f"al-{config.experiment.iteration}"
-    elif config.experiment.kind == "full":
-        save_dir = Path(output_dir) / "models" / "full"
+    save_dir = Path(output_dir) / "models" / "latest-model"
+    if save_dir.exists():
+        shutil.rmtree(save_dir)
 
     logger.info(f"Movig best checkpoint to experiment folder")
     save_dir.mkdir(parents=True, exist_ok=True)
